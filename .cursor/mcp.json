@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "aegisops": {
+      "command": "c:\\Users\\kkjay\\Documents\\personal\\AegisOps\\bin\\aegisops-mcp.exe",
+      "env": {
+        "DATABASE_URL": "postgres://aegisops:aegisops@localhost:5433/aegisops?sslmode=disable",
+        "COPILOT_API_URL": "http://localhost:5000",
+        "SPOTTING_API_URL": "http://localhost:3000"
+      }
+    }
+  }
+}

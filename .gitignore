@@ -1,0 +1,12 @@
+bin/
+embed/out/
+.env
+.env.local
+!.env.example
+node_modules/
+web/node_modules/
+web/.next/
+web/out/
+*.exe
+.DS_Store
+Thumbs.db

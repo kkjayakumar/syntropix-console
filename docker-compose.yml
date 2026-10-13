@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: aegisops
+      POSTGRES_PASSWORD: aegisops
+      POSTGRES_DB: aegisops
+    ports:
+      - "5433:5432"
+    volumes:
+      - aegisops_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aegisops"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  aegisops:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_SPOTTING_PUBLIC_KEY: ${NEXT_PUBLIC_SPOTTING_PUBLIC_KEY:-}
+        NEXT_PUBLIC_SPOTTING_API_URL: ${NEXT_PUBLIC_SPOTTING_API_URL:-http://host.docker.internal:3000}
+        NEXT_PUBLIC_SPOTTING_DASHBOARD_URL: ${NEXT_PUBLIC_SPOTTING_DASHBOARD_URL:-http://127.0.0.1:3001}
+        NEXT_PUBLIC_AEGISOPS_ENV: ${AEGISOPS_ENV:-development}
+    env_file:
+      - .env
+    ports:
+      - "5001:5001"
+    environment:
+      PORT: "5001"
+      AEGISOPS_ENV: development
+      AEGISOPS_ALLOW_DOGFOOD: "true"
+      NEXT_PUBLIC_AEGISOPS_ALLOW_DOGFOOD: "true"
+      DATABASE_URL: postgres://aegisops:aegisops@postgres:5432/aegisops?sslmode=disable
+      AEGISOPS_PUBLIC_URL: http://localhost:5001
+      COPILOT_API_URL: http://host.docker.internal:5000
+      SPOTTING_API_URL: http://host.docker.internal:3000
+      DEPLOY_VERIFY_URL: ${DEPLOY_VERIFY_URL:-http://127.0.0.1:5001/healthz}
+      AWS_REGION: ${AWS_REGION:-ap-south-1}
+      EC2_INSTANCE_ID: ${EC2_INSTANCE_ID:-}
+      SECRETS_MANAGER_ID: ${SECRETS_MANAGER_ID:-dev/syntropix}
+      AEGISOPS_REQUIRE_GATEWAY: ${AEGISOPS_REQUIRE_GATEWAY:-false}
+      WORKSPACE_SECRETS_KEY: ${WORKSPACE_SECRETS_KEY:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  aegisops_pg:

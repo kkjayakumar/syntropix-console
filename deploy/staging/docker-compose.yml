@@ -1,0 +1,41 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: aegisops
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aegisops}
+      POSTGRES_DB: aegisops
+    volumes:
+      - aegisops_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aegisops -d aegisops"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    restart: unless-stopped
+
+  aegisops:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_SPOTTING_PUBLIC_KEY: ${NEXT_PUBLIC_SPOTTING_PUBLIC_KEY:-}
+        NEXT_PUBLIC_SPOTTING_API_URL: ${NEXT_PUBLIC_SPOTTING_API_URL:-https://api.spotting.syntropix.io}
+        NEXT_PUBLIC_SPOTTING_DASHBOARD_URL: ${NEXT_PUBLIC_SPOTTING_DASHBOARD_URL:-https://spotting.syntropix.io}
+        NEXT_PUBLIC_AEGISOPS_ENV: ${AEGISOPS_ENV:-production}
+        NEXT_PUBLIC_AEGISOPS_ALLOW_DOGFOOD: ${AEGISOPS_ALLOW_DOGFOOD:-false}
+    env_file: .env
+    # DATABASE_URL comes from .env (local postgres OR Supabase). Do not override here.
+    ports:
+      - "5001:5001"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+    restart: unless-stopped
+
+volumes:
+  aegisops_pg:

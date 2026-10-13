@@ -1,0 +1,22 @@
+# Use from /opt/spotting:
+#   docker compose -f docker-compose.yml -f /opt/aegisops/deploy/staging/spotting-compose.staging.yml up -d --build
+#
+# NEXT_PUBLIC_* are baked into the web image at build time — must rebuild web after changes.
+
+services:
+  api:
+    environment:
+      SPOTTING_AUTH_URL: ${SPOTTING_AUTH_URL:-https://api.spotting.syntropix.io}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://spotting.syntropix.io,https://aegisops.syntropix.io}
+
+  web:
+    build:
+      args:
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://spotting.syntropix.io}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-https://spotting.syntropix.io}
+        NEXT_PUBLIC_SERVER_URL: ${NEXT_PUBLIC_SERVER_URL:-https://api.spotting.syntropix.io}
+        SPOTTING_API_INTERNAL_URL: http://api:3000
+    environment:
+      NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://spotting.syntropix.io}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-https://spotting.syntropix.io}
+      NEXT_PUBLIC_SERVER_URL: ${NEXT_PUBLIC_SERVER_URL:-https://api.spotting.syntropix.io}

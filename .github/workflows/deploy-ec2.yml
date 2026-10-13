@@ -1,0 +1,139 @@
+name: deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: GHCR tag (default sha- from main HEAD)
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: deploy-ec2-production
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-south-1
+  EC2_INSTANCE_ID: i-0350a48d3222dd239
+  SECRETS_MANAGER_ID: dev/syntropix
+  DEPLOY_SCRIPT: /opt/aegisops/deploy/ec2/deploy.sh
+  IMAGE_PLATFORM: linux/arm64
+
+jobs:
+  deploy:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Resolve image tag
+        id: tag
+        env:
+          DISPATCH_TAG: ${{ inputs.image_tag }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          if [ -n "$DISPATCH_TAG" ]; then
+            echo "tag=$DISPATCH_TAG" >> "$GITHUB_OUTPUT"
+          elif [ -n "$RUN_SHA" ]; then
+            echo "tag=sha-${RUN_SHA:0:7}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy via SSM Run Command
+        id: ssm
+        env:
+          IMAGE_TAG: ${{ steps.tag.outputs.tag }}
+          # Prefer long-lived Secrets Manager / repo GHCR_TOKEN; fall back to job token.
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN || github.token }}
+          GHCR_USER: ${{ github.repository_owner }}
+          # Always use the job token to sync deploy.sh (needs contents:read).
+          SYNC_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Sync deploy.sh from main (EC2 copy can lag), then run it.
+          PARAMS=$(jq -n \
+            --arg secret "${{ env.SECRETS_MANAGER_ID }}" \
+            --arg region "${{ env.AWS_REGION }}" \
+            --arg platform "${{ env.IMAGE_PLATFORM }}" \
+            --arg tag "$IMAGE_TAG" \
+            --arg token "$GHCR_TOKEN" \
+            --arg sync "$SYNC_TOKEN" \
+            --arg user "$GHCR_USER" \
+            --arg script "${{ env.DEPLOY_SCRIPT }}" \
+            --arg api "https://api.github.com/repos/kkjayakumar/AegIsOps/contents/deploy/ec2/deploy.sh?ref=main" \
+            '{commands:["set -euo pipefail; export AEGISOPS_SECRET_ID=\($secret) AWS_REGION=\($region) DOCKER_DEFAULT_PLATFORM=\($platform) GHCR_TOKEN=\($token) GHCR_USER=\($user); curl -fsSL -H \"Authorization: Bearer \($sync)\" -H \"Accept: application/vnd.github.raw\" \($api) -o \($script); chmod +x \($script); bash \($script) \($tag)"]}')
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "${{ env.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --comment "AegisOps deploy ${IMAGE_TAG} from GitHub Actions" \
+            --timeout-seconds 600 \
+            --parameters "$PARAMS" \
+            --query "Command.CommandId" --output text)
+          echo "command_id=$CMD_ID" >> "$GITHUB_OUTPUT"
+          echo "SSM command: $CMD_ID"
+
+      - name: Wait for SSM command
+        env:
+          CMD_ID: ${{ steps.ssm.outputs.command_id }}
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id "$CMD_ID" \
+              --instance-id "${{ env.EC2_INSTANCE_ID }}" \
+              --query Status --output text 2>/dev/null || echo Pending)
+            echo "attempt $i: $STATUS"
+            case "$STATUS" in
+              Success)
+                aws ssm get-command-invocation \
+                  --command-id "$CMD_ID" \
+                  --instance-id "${{ env.EC2_INSTANCE_ID }}" \
+                  --query StandardOutputContent --output text
+                exit 0
+                ;;
+              Failed|Cancelled|TimedOut)
+                aws ssm get-command-invocation \
+                  --command-id "$CMD_ID" \
+                  --instance-id "${{ env.EC2_INSTANCE_ID }}" \
+                  --query '[StandardOutputContent,StandardErrorContent]' --output text
+                exit 1
+                ;;
+            esac
+            sleep 10
+          done
+          echo "SSM command timed out waiting for completion"
+          exit 1
+
+      - name: Deploy summary
+        run: |
+          {
+            echo "### EC2 deploy"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Instance | \`${{ env.EC2_INSTANCE_ID }}\` |"
+            echo "| Secret | \`${{ env.SECRETS_MANAGER_ID }}\` |"
+            echo "| Image | \`ghcr.io/kkjayakumar/aegisops:${{ steps.tag.outputs.tag }}\` |"
+            echo "| Platform | \`${{ env.IMAGE_PLATFORM }}\` (EC2 aarch64) |"
+            echo "| Region | \`${{ env.AWS_REGION }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "aegisops-staging": {
+      "command": "c:\\Users\\kkjay\\Documents\\personal\\AegisOps\\bin\\aegisops-mcp.exe",
+      "env": {
+        "DATABASE_URL": "postgres://USER:PASSWORD@HOST:5432/aegisops?sslmode=require",
+        "COPILOT_API_URL": "https://monitoring.syntropix.io",
+        "SPOTTING_API_URL": "https://api.spotting.syntropix.io"
+      }
+    }
+  }
+}

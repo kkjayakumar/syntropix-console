@@ -1,0 +1,7 @@
+services:
+  aegisops:
+    image: ghcr.io/kkjayakumar/aegisops:${AEGISOPS_IMAGE_TAG:-latest}
+    platform: linux/arm64
+    pull_policy: always
+    volumes:
+      - ${GITHUB_APP_SECRETS_DIR:-/opt/aegisops/secrets}:/secrets:ro

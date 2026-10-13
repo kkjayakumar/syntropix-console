@@ -1,0 +1,89 @@
+name: rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Failed workflow run id
+        required: true
+      sha:
+        description: Commit SHA that failed post-deploy health check
+        required: false
+      reason:
+        description: Sentinel failure reason
+        required: false
+      target_tag:
+        description: GHCR image tag to redeploy (default resolves previous commit sha-* tag)
+        required: false
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/kkjayakumar/aegisops
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve rollback image tag
+        id: tag
+        env:
+          FAILED_SHA: ${{ inputs.sha }}
+          TARGET_TAG: ${{ inputs.target_tag }}
+        run: |
+          set -euo pipefail
+          if [ -n "$TARGET_TAG" ]; then
+            echo "tag=$TARGET_TAG" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -n "$FAILED_SHA" ] && git cat-file -e "${FAILED_SHA}^{commit}" 2>/dev/null; then
+            PREV=$(git rev-parse "${FAILED_SHA}^" 2>/dev/null || git rev-parse HEAD~1)
+            SHORT=${PREV:0:7}
+            echo "tag=sha-${SHORT}" >> "$GITHUB_OUTPUT"
+          else
+            PREV=$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)
+            SHORT=${PREV:0:7}
+            echo "tag=sha-${SHORT}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify rollback image exists on GHCR
+        run: docker manifest inspect "${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}"
+
+      - name: Rollback summary
+        run: |
+          {
+            echo "### AegisOps Sentinel rollback"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Failed run | \`${{ inputs.run_id }}\` |"
+            echo "| Failed SHA | \`${{ inputs.sha }}\` |"
+            echo "| Reason | ${{ inputs.reason }} |"
+            echo "| Redeploy tag | \`${{ steps.tag.outputs.tag }}\` |"
+            echo "| Image | \`${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}\` |"
+            echo ""
+            echo "#### Local / workstation"
+            echo '```powershell'
+            echo ".\scripts\update-from-ghcr.ps1 -Tag ${{ steps.tag.outputs.tag }}"
+            echo '```'
+            echo ""
+            echo "#### Staging host"
+            echo '```bash'
+            echo "export AEGISOPS_IMAGE_TAG=${{ steps.tag.outputs.tag }}"
+            echo "docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull aegisops"
+            echo "docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d --no-build aegisops"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

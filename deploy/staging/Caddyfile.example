@@ -1,0 +1,8 @@
+# Reverse proxy for Syntropix Console (cloud: console.syntropix.io)
+# Install: apt install caddy
+# Copy to /etc/caddy/Caddyfile and: systemctl reload caddy
+
+console.syntropix.io {
+	encode gzip
+	reverse_proxy localhost:5001
+}

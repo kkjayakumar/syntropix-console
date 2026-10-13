@@ -1,0 +1,15 @@
+# Use with Supabase / external Postgres — skips local postgres container
+# Usage: docker compose -f docker-compose.yml -f docker-compose.external-db.yml up -d --build aegisops
+#
+# GitHub App private key (Phase 8):
+#   mkdir -p /opt/aegisops/secrets && chmod 755 /opt/aegisops/secrets
+#   install PEM to /opt/aegisops/secrets/github-app.pem && chmod 644
+
+services:
+  postgres:
+    profiles: ["local-db"]
+
+  aegisops:
+    depends_on: !reset []
+    volumes:
+      - ${GITHUB_APP_SECRETS_DIR:-/opt/aegisops/secrets}:/secrets:ro
