@@ -13,7 +13,16 @@ Do **not** use employer or secondary GitHub-linked emails (they can attach the w
 
 ## Cursor / IDE
 
-If commits show `Co-authored-by: Cursor <cursoragent@cursor.com>`, disable automatic co-author trailers in Cursor settings before committing to this repository.
+Cursor adds `Co-authored-by: Cursor <cursoragent@cursor.com>` unless you disable it. That creates a **cursoragent** contributor on GitHub.
+
+1. Turn off commit attribution / co-author in Cursor settings.
+2. For commits on this repo, disable hooks when needed:
+
+```bash
+git -c core.hooksPath=.git/empty-hooks commit ...
+```
+
+(`.git/empty-hooks` is an empty directory in this clone.)
 
 ## Verify before push
 
