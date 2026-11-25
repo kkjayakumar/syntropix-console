@@ -3,9 +3,8 @@ package clients
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"strconv"
 	"time"
 )
@@ -85,27 +84,12 @@ func DogfoodCopilotWebhookPayload(correlationID string, issue map[string]any, is
 }
 
 func (c *CopilotClient) listIssues(ctx context.Context) ([]map[string]any, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/api/sentry/issues", nil)
-	if err != nil {
-		return nil, err
-	}
-	if c.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.Token)
-	}
-	res, err := c.HTTP.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(res.Body)
-		return nil, fmt.Errorf("copilot issues list %d: %s", res.StatusCode, string(body))
-	}
 	var out []map[string]any
-	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
-		return nil, err
+	err := c.getIssueJSON(ctx, "/api/sentry/issues", &out)
+	if errors.Is(err, errCopilotRouteUnavailable) {
+		err = c.getIssueJSON(ctx, "/api/apm/errors", &out)
 	}
-	return out, nil
+	return out, err
 }
 
 func issueIDString(issue map[string]any) string {

@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 )
 
@@ -29,31 +32,67 @@ type CopilotIssueDetail struct {
 	Events []map[string]any `json:"events"`
 }
 
+var errCopilotRouteUnavailable = errors.New("copilot API route unavailable")
+
 func (c *CopilotClient) GetIssue(ctx context.Context, issueID string) (*CopilotIssueDetail, error) {
 	if c == nil || c.BaseURL == "" {
 		return nil, fmt.Errorf("copilot client not configured")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/api/sentry/issues/%s", c.BaseURL, issueID), nil)
-	if err != nil {
+	id := url.PathEscape(issueID)
+	var out CopilotIssueDetail
+	if err := c.getIssueJSON(ctx, "/api/sentry/issues/"+id, &out); !errors.Is(err, errCopilotRouteUnavailable) {
+		if err != nil {
+			return nil, err
+		}
+		return &out, nil
+	}
+
+	path := "/api/apm/errors/" + id
+	var issue map[string]any
+	if err := c.getIssueJSON(ctx, path, &issue); err != nil {
 		return nil, err
 	}
+	var events []struct {
+		Event map[string]any `json:"event"`
+	}
+	if err := c.getIssueJSON(ctx, path+"/events", &events); err != nil {
+		return nil, err
+	}
+	out.Issue = issue
+	for _, event := range events {
+		if event.Event != nil {
+			out.Events = append(out.Events, map[string]any{"payload": event.Event})
+		}
+	}
+	return &out, nil
+}
+
+func (c *CopilotClient) getIssueJSON(ctx context.Context, path string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(c.BaseURL, "/")+path, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "application/json")
 	if c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
 	res, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer res.Body.Close()
+	// Some versions serve the dashboard HTML for an unknown API route.
+	if res.StatusCode == http.StatusNotFound || (res.StatusCode == http.StatusOK &&
+		strings.HasPrefix(strings.ToLower(res.Header.Get("Content-Type")), "text/html")) {
+		return fmt.Errorf("%w: %s", errCopilotRouteUnavailable, path)
+	}
 	if res.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(res.Body)
-		return nil, fmt.Errorf("copilot issue fetch %d: %s", res.StatusCode, string(body))
+		return fmt.Errorf("copilot %s returned HTTP %d", path, res.StatusCode)
 	}
-	var out CopilotIssueDetail
-	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
-		return nil, err
+	if err := json.NewDecoder(res.Body).Decode(out); err != nil {
+		return fmt.Errorf("decode copilot %s: %w", path, err)
 	}
-	return &out, nil
+	return nil
 }
 
 func (c *CopilotClient) GetEventLogs(ctx context.Context, eventID string) ([]string, error) {
