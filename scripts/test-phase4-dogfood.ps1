@@ -23,21 +23,13 @@ Write-Host "Waiting ${WaitSec}s for Copilot/Spotting webhooks..." -ForegroundCol
 Start-Sleep -Seconds $WaitSec
 
 Write-Host "=== Phase 4: check correlated issue ===" -ForegroundColor Cyan
-$issues = Invoke-RestMethod -Uri "$AegisUrl/api/v1/issues?status=detected" -TimeoutSec 10
-$match = $issues.issues | Where-Object { $_.requestId -eq $cid -or $_.title -match "dogfood" } | Select-Object -First 1
+$issues = Invoke-RestMethod -Uri "$AegisUrl/api/v1/issues" -TimeoutSec 10
+$match = $issues.issues | Where-Object { $_.correlationId -eq $cid } | Select-Object -First 1
 if ($match) {
+  if (-not $match.telemetryBundle) { throw "Issue #$($match.id) has no telemetry bundle for $cid" }
   Write-Host "Issue #$($match.id) detected: $($match.title)" -ForegroundColor Green
   Write-Host "View: $AegisUrl/issues/$($match.id)"
   exit 0
 }
 
-$recent = Invoke-RestMethod -Uri "$AegisUrl/api/v1/issues" -TimeoutSec 10
-$latest = $recent.issues | Select-Object -First 1
-if ($latest) {
-  Write-Host "No exact requestId match yet. Latest issue #$($latest.id): $($latest.title)" -ForegroundColor Yellow
-  Write-Host "Confirm Copilot + Spotting webhooks are configured and SENTRY_DSN is set."
-  exit 0
-}
-
-Write-Host "No issues in inbox - verify stack webhooks and SENTRY_DSN" -ForegroundColor Yellow
-exit 1
+throw "No incident matched $cid. Verify telemetry ingest, webhook delivery, and SENTRY_DSN."
